@@ -17,7 +17,7 @@ echo "AGT=$AGT"
 
 echo "=== [2/5] Team 就绪 ==="
 $AGT get teams "$TEAM" 2>&1 | tee /tmp/juchang-team.txt | head -50
-if grep -q "LeaderReady=true" /tmp/juchang-team.txt && grep -qE "ReadyWorkers=? *4/4" /tmp/juchang-team.txt; then
+if grep -qE "LeaderReady:\s*true" /tmp/juchang-team.txt && grep -qE "ReadyWorkers:\s*4/4" /tmp/juchang-team.txt; then
   echo "TEAM_READY_OK"
 else
   echo "TEAM_NOT_READY — 把上面输出截图发回；不要继续。"
@@ -25,7 +25,7 @@ else
 fi
 
 echo "=== [3/5] 房间三方核对 ==="
-ROOM=$(grep -oE '\![A-Za-z0-9]+:[A-Za-z0-9._-]+:[0-9]+' /tmp/juchang-team.txt | head -1)
+ROOM=$(grep 'LeaderDMRoomID' /tmp/juchang-team.txt | grep -oE '\![A-Za-z0-9]+:[A-Za-z0-9._-]+:[0-9]+' | head -1)
 echo "LeaderDMRoomID(from agt)=$ROOM"
 if [ "$ROOM" != "$EXPECTED_ROOM" ]; then
   echo "ROOM_TARGET_MISMATCH: 派单目标是 $EXPECTED_ROOM，当前 Team 是 $ROOM"
