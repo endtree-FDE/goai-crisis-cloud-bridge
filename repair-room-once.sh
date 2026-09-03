@@ -48,7 +48,7 @@ cp "$WORK/p5-snapshot.json" "$STATE/latest-preflight-p5-snapshot.json"
 
 echo '=== 3/5 FETCH FIXED, HASH-CHECKED REPAIR MODULE ==='
 curl -fsSL --max-time 30 "https://raw.githubusercontent.com/endtree-FDE/goai-crisis-cloud-bridge/$REV/repair-room-once.py" -o "$WORK/repair-room-once.py"
-printf '%s  %s\n' '9199d561eb5eb0d62560895bd72e57a7aba2941de1182be0ff06e469b06fb9ef' "$WORK/repair-room-once.py" | sha256sum -c -
+printf '%s  %s\n' 'f1535c5d86bdab3369e02cb57e9880e7f5b07219f0a7e775d574e2ae233569b7' "$WORK/repair-room-once.py" | sha256sum -c -
 REMOTE="/tmp/$(basename "$WORK")"
 docker cp "$WORK" "$C:/tmp/" >/dev/null
 

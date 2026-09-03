@@ -109,8 +109,10 @@ def repair_once(io, snapshot, apply=False):
     return plan
 
 
-def cli(args, token, optional=False):
-    env = dict(os.environ, AGENTTEAMS_AUTH_TOKEN=token)
+def cli(args, optional=False):
+    # Preserve the Controller's native SA/env/token-file discovery, exactly as
+    # direct `docker exec ... agt` does. Matrix admin tokens are NOT CLI admin SAs.
+    env = dict(os.environ)
     try:
         result = subprocess.run(["agt"] + args, env=env, stdin=subprocess.DEVNULL,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -118,9 +120,11 @@ def cli(args, token, optional=False):
     except (OSError, subprocess.TimeoutExpired):
         raise RepairError("AGT_EXECUTION_FAILED") from None
     if result.returncode:
-        if optional and re.search(r"HTTP 404\b", result.stderr):
+        http = re.search(r"\bHTTP ([1-5][0-9]{2})\b", result.stderr)
+        if optional and http and http.group(1) == "404":
             return None
-        raise RepairError("AGT_" + "_".join(args[:2]).upper() + "_FAILED")
+        suffix = "_HTTP_" + http.group(1) if http else "_FAILED"
+        raise RepairError("AGT_" + "_".join(args[:2]).upper() + suffix)
     # Official projectWrite can return plain 'ok'. Pause still requires JSON readback.
     if args[:2] == ["project", "pause"] and result.stdout.strip() == "ok":
         return {}
@@ -178,10 +182,10 @@ class ControllerIO:
         self.token = ""
 
     def team(self):
-        return cli(["get", "teams", TEAM, "-o", "json"], self.token)
+        return cli(["get", "teams", TEAM, "-o", "json"])
 
     def leader(self, name):
-        return cli(["get", "workers", name, "-o", "json"], self.token).get("matrixUserID")
+        return cli(["get", "workers", name, "-o", "json"]).get("matrixUserID")
 
     def members(self, room):
         data = self.api("GET", "/_matrix/client/v3/rooms/" + urllib.parse.quote(room, safe="") + "/members?membership=join")
@@ -189,10 +193,10 @@ class ControllerIO:
         return [e["state_key"] for e in data["chunk"] if e.get("type") == "m.room.member" and e.get("content", {}).get("membership") == "join"]
 
     def project(self, project_id, optional=False):
-        return cli(["get", "projects", project_id, "-o", "json"], self.token, optional)
+        return cli(["get", "projects", project_id, "-o", "json"], optional=optional)
 
     def pause(self, project_id):
-        return cli(["project", "pause", project_id, "--reason", "Authorized room mismatch repair; preserve p5 evidence"], self.token)
+        return cli(["project", "pause", project_id, "--reason", "Authorized room mismatch repair; preserve p5 evidence"])
 
     def claim(self, value):
         self.record("attempt.json", dict(value, at=now()))

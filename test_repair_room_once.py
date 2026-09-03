@@ -150,28 +150,42 @@ class RepairTests(unittest.TestCase):
 
 
 class TransportTests(unittest.TestCase):
-    def test_cli_uses_agt_with_token_only_in_environment(self):
-        token = "SYNTHETIC_TEST_TOKEN"
-        with patch.object(repair.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout='{"status":"active"}', stderr="")) as run:
-            self.assertEqual(repair.cli(["get", "projects", repair.OLD_ID, "-o", "json"], token)["status"], "active")
-        args, kwargs = run.call_args
-        self.assertEqual(args[0][0], "agt")
-        self.assertNotIn(token, str(args))
-        self.assertEqual(kwargs["env"]["AGENTTEAMS_AUTH_TOKEN"], token)
-        self.assertEqual(kwargs["timeout"], 35)
+    def test_all_agt_calls_preserve_native_auth_never_use_matrix_token(self):
+        io = repair.ControllerIO("unused")
+        io.token = "SYNTHETIC_MATRIX_TOKEN"
+        for native in ({"AGENTTEAMS_AUTH_TOKEN_FILE": "/synthetic/cli-token"},
+                       {"AGENTTEAMS_AUTH_TOKEN": "SYNTHETIC_CONTROLLER_TOKEN"}):
+            with self.subTest(native=list(native)), patch.dict(repair.os.environ, native, clear=True):
+                reply = SimpleNamespace(returncode=0, stdout='{"matrixUserID":"@lead:test","status":"active"}', stderr="")
+                with patch.object(repair.subprocess, "run", return_value=reply) as run:
+                    io.team()
+                    io.leader("lead")
+                    io.project(repair.OLD_ID)
+                    io.pause(repair.OLD_ID)
+                self.assertEqual(run.call_count, 4)
+                for args, kwargs in run.call_args_list:
+                    self.assertEqual(args[0][0], "agt")
+                    self.assertEqual(kwargs["env"], native)
+                    self.assertNotIn(io.token, str(args) + str(kwargs))
+                    self.assertEqual(kwargs["timeout"], 35)
 
     def test_only_real_404_means_project_absent(self):
         for code in (404, 401, 500):
             with self.subTest(code=code), patch.object(repair.subprocess, "run", return_value=SimpleNamespace(returncode=1, stdout="", stderr="HTTP " + str(code) + ": SYNTHETIC_SECRET")):
                 if code == 404:
-                    self.assertIsNone(repair.cli(["get", "projects", repair.NEW_ID], "", True))
+                    self.assertIsNone(repair.cli(["get", "projects", repair.NEW_ID], optional=True))
                 else:
-                    with self.assertRaisesRegex(repair.RepairError, "^AGT_GET_PROJECTS_FAILED$"):
-                        repair.cli(["get", "projects", repair.NEW_ID], "", True)
+                    with self.assertRaisesRegex(repair.RepairError, "^AGT_GET_PROJECTS_HTTP_" + str(code) + "$"):
+                        repair.cli(["get", "projects", repair.NEW_ID], optional=True)
+
+    def test_team_auth_failure_retains_http_code_but_not_body(self):
+        with patch.object(repair.subprocess, "run", return_value=SimpleNamespace(returncode=1, stdout="", stderr="Error: HTTP 401: SYNTHETIC_SECRET")):
+            with self.assertRaisesRegex(repair.RepairError, "^AGT_GET_TEAMS_HTTP_401$"):
+                repair.cli(["get", "teams", repair.TEAM, "-o", "json"])
 
     def test_plain_ok_pause_is_supported(self):
         with patch.object(repair.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout="ok\n", stderr="")):
-            self.assertEqual(repair.cli(["project", "pause", repair.OLD_ID], ""), {})
+            self.assertEqual(repair.cli(["project", "pause", repair.OLD_ID]), {})
 
     def test_network_error_single_attempt_no_secret_in_error(self):
         io = repair.ControllerIO("unused")
