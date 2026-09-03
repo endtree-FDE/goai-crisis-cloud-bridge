@@ -9,10 +9,15 @@ OUT=/workspace/cloud-evidence
 echo "=== [1/4] 在 leader 容器定位证据 ==="
 SHARED=$(docker exec $LEAD sh -c 'printf %s "$AGENTTEAMS_SHARED_DIR"')
 echo "shared_dir=$SHARED"
-docker exec $LEAD sh -c "ls -t '$SHARED'/projects/ 2>/dev/null | head -5"
-PROJ=$(docker exec $LEAD sh -c "ls -t '$SHARED'/projects/ 2>/dev/null | head -1")
-echo "latest_project=$PROJ"
-if [ -z "$PROJ" ]; then echo "FAIL: 还没有项目目录——运行可能还在进行，等几分钟再跑"; exit 1; fi
+# Codex 评审修正：不再按「最新目录」猜案件，必须显式指定 projectId，防止串案。
+PROJ="${1:-}"
+if [ -z "$PROJ" ]; then
+  echo "用法: bash collect-evidence.sh <projectId>（例如 cloud-crisis-2014-east-art-center-p4）"
+  echo "当前共享存储里的项目："
+  docker exec $LEAD sh -c "ls -t '$SHARED'/projects/ 2>/dev/null | head -5"
+  exit 1
+fi
+echo "target_project=$PROJ"
 
 echo "=== [2/4] 检查关键证据文件 ==="
 docker exec $LEAD sh -c "ls -la '$SHARED'/projects/'$PROJ'/workspace/ 2>/dev/null | grep -E 'runtime-evidence|receipt|audit'"
