@@ -102,7 +102,7 @@ test('wrong old ID, DAG and production permissions fail closed', () => {
 });
 test('shell pins the exact module hash and never restarts or cancels', () => {
   const shell = fs.readFileSync(new URL('./repair-room-once.sh', import.meta.url), 'utf8');
-  const code = fs.readFileSync(new URL('./repair-room-once.mjs', import.meta.url));
+  const code = fs.readFileSync(new URL('./repair-room-once.py', import.meta.url));
   assert.ok(shell.includes(crypto.createHash('sha256').update(code).digest('hex')));
   assert.doesNotMatch(shell, /docker (?:restart|rm|stop)|agt project cancel|kill -HUP/);
   assert.match(shell, /--plan/);
