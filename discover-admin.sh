@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# goai-crisis-cloud-bridge · 定位能用的 Matrix admin 密码来源（绝不打印任何候选值；只报告来源与是否可登录）
+# goai-crisis-cloud-bridge · 定位能用的 Matrix admin 密码来源 v2（绝不打印任何候选值；只报告来源与是否可登录）
 set -uo pipefail
 MATRIX_URL="http://127.0.0.1:6167"
 ADMIN_USER="admin"
 
 try_login() { # $1=candidate password (never echoed)
   docker exec agentteams-controller sh -c '
-    payload=$(printf "{\"type\":\"m.login.password\",\"identifier\":{\"type\":\"m.id.user\",\"user\":\"%s\"},\"password\":\"%s\"}" "$1" "$2")
+    payload=$(jq -cn --arg user "$1" --arg password "$2" "{type:\"m.login.password\",identifier:{type:\"m.id.user\",user:\$user},password:\$password}")
     code=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" -d "$payload" "$3/_matrix/client/v3/login")
     printf "%s" "$code"
-  ' sh "$1" "$MATRIX_URL" 2>/dev/null
+  ' sh "$ADMIN_USER" "$1" "$MATRIX_URL" 2>/dev/null
 }
 
 echo "=== 候选来源逐一试登（只报来源与结果） ==="
@@ -20,7 +20,6 @@ V=$(docker exec agentteams-controller printenv AGENTTEAMS_ADMIN_PASSWORD 2>/dev/
 V=$(docker exec agentteams-manager printenv AGENTTEAMS_ADMIN_PASSWORD 2>/dev/null) && [ -n "$V" ] && report "$V" "manager env AGENTTEAMS_ADMIN_PASSWORD"
 V=$(docker exec agentteams-dashboard printenv AGENTTEAMS_ADMIN_PASSWORD 2>/dev/null) && [ -n "$V" ] && report "$V" "dashboard env AGENTTEAMS_ADMIN_PASSWORD"
 
-# 配置文件里的 password 字段（manager fs、workspace env 文件）
 for f in $(grep -rlE '"password"|^AGENTTEAMS_ADMIN_PASSWORD=' /root/agentteams-manager /workspace/.env /workspace/*.env 2>/dev/null | head -8); do
   for cand in $(grep -hoE '"password"[^,}]*' "$f" 2>/dev/null | sed -E 's/.*"password"\s*:\s*"([^"]*)".*/\1/' | head -3); do
     [ -n "$cand" ] && report "$cand" "file:$f (json password field)"
