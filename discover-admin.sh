@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
-# goai-crisis-cloud-bridge · 定位能用的 Matrix admin 密码来源 v2（绝不打印任何候选值；只报告来源与是否可登录）
+# goai-crisis-cloud-bridge · 定位能用的 Matrix admin 密码来源 v3（stdin 传候选，无嵌套引号，不打印任何值）
 set -uo pipefail
-MATRIX_URL="http://127.0.0.1:6167"
-ADMIN_USER="admin"
+BRIDGE="https://raw.githubusercontent.com/endtree-FDE/goai-crisis-cloud-bridge/main"
 
-try_login() { # $1=candidate password (never echoed)
-  docker exec agentteams-controller sh -c '
-    payload=$(jq -cn --arg user "$1" --arg password "$2" "{type:\"m.login.password\",identifier:{type:\"m.id.user\",user:\$user},password:\$password}")
-    code=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" -d "$payload" "$3/_matrix/client/v3/login")
-    printf "%s" "$code"
-  ' sh "$ADMIN_USER" "$1" "$MATRIX_URL" 2>/dev/null
-}
+curl -sL "$BRIDGE/try-login.sh" -o /tmp/try-login.sh
+docker cp /tmp/try-login.sh agentteams-controller:/tmp/try-login.sh
+
+echo "=== 连通性自检 ==="
+printf 'probe' | docker exec -i agentteams-controller sh /tmp/try-login.sh admin http://127.0.0.1:6167
+echo " <- 期望 403（密码错误但连接正常）；若 000 则仍有问题"
 
 echo "=== 候选来源逐一试登（只报来源与结果） ==="
 idx=0
-report() { idx=$((idx+1)); code=$(try_login "$1"); if [ "$code" = "200" ]; then echo "#$idx $2 => LOGIN_OK"; else echo "#$idx $2 => $code"; fi; }
+report() {
+  idx=$((idx+1))
+  code=$(printf '%s' "$1" | docker exec -i agentteams-controller sh /tmp/try-login.sh admin http://127.0.0.1:6167 2>/dev/null)
+  if [ "$code" = "200" ]; then echo "#$idx $2 => LOGIN_OK"; else echo "#$idx $2 => $code"; fi
+}
 
 V=$(docker exec agentteams-controller printenv AGENTTEAMS_ADMIN_PASSWORD 2>/dev/null) && [ -n "$V" ] && report "$V" "controller env AGENTTEAMS_ADMIN_PASSWORD"
 V=$(docker exec agentteams-manager printenv AGENTTEAMS_ADMIN_PASSWORD 2>/dev/null) && [ -n "$V" ] && report "$V" "manager env AGENTTEAMS_ADMIN_PASSWORD"
@@ -29,4 +31,3 @@ for f in $(grep -rlE '"password"|^AGENTTEAMS_ADMIN_PASSWORD=' /root/agentteams-m
   done
 done
 echo "=== DISCOVER_ADMIN_DONE ==="
-echo "说明：出现 LOGIN_OK 的来源 = 可用密码来源；dispatch 会改从该来源取密码（全程不显示值）。"
