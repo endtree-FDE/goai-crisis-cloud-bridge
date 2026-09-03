@@ -7,19 +7,21 @@ MATRIX_URL='http://127.0.0.1:6167'
 FRAG='/etc/supervisor/conf.d/supervisord.conf'
 EMERGENCY="$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 
-echo "=== [1/9] 定位 supervisord 主配置 ==="
-SUPMAIN=$(docker exec $C sh -c 'ps aux | grep -v grep | grep supervisord | head -1 | grep -oE "\-c [^ ]+" | cut -d" " -f2')
-[ -z "$SUPMAIN" ] && SUPMAIN=$(docker exec $C sh -c 'for f in /etc/supervisord.conf /etc/supervisor/supervisord.conf /opt/agentteams/supervisord.conf; do [ -f "$f" ] && echo "$f" && break; done')
-echo "SUPMAIN=${SUPMAIN:-NOT_FOUND}"
-[ -z "$SUPMAIN" ] && { echo "FAIL: 找不到 supervisord 主配置，截图发回"; exit 1; }
-docker exec $C sh -c "grep -c 'supervisorctl' '$SUPMAIN'"
+echo "=== [1/9] 定位 supervisorctl 控制通道 ==="
+SUPCTL="supervisorctl"
+if ! docker exec $C sh -c 'supervisorctl status >/dev/null 2>&1'; then
+  SOCK=$(docker exec $C sh -c 'find /var/run /run /tmp -name "supervisor*.sock" 2>/dev/null | head -1')
+  [ -n "$SOCK" ] && SUPCTL="supervisorctl -s unix://$SOCK"
+fi
+echo "SUPCTL=$SUPCTL"
+docker exec $C sh -c "$SUPCTL status" | head -6 || { echo "FAIL: supervisorctl 控制通道不可用，截图发回"; exit 1; }
 
 echo "=== [2/9] 注入应急密码到 [program:tuwunel]（片段文件） ==="
 docker exec $C sh -c "sed -i '/CONDUWUIT_EMERGENCY_PASSWORD/d' '$FRAG' && sed -i '/\[program:tuwunel\]/a environment=CONDUWUIT_EMERGENCY_PASSWORD=\"$EMERGENCY\"' '$FRAG'"
 docker exec $C sh -c "grep -A 2 'program:tuwunel' '$FRAG' | sed -E 's/(EMERGENCY_PASSWORD=).*/\1<set>/'"
 
 echo "=== [3/9] reread + update + 重启 Tuwunel ==="
-docker exec $C sh -c "supervisorctl -c '$SUPMAIN' reread && supervisorctl -c '$SUPMAIN' update && supervisorctl -c '$SUPMAIN' restart tuwunel" 2>&1 | head -5
+docker exec $C sh -c "supervisorctl reread && supervisorctl update && supervisorctl restart tuwunel" 2>&1 | head -5
 sleep 14
 docker exec $C sh -c 'curl -s -o /dev/null -w "tuwunel-up=%{http_code}\n" http://127.0.0.1:6167/_matrix/client/versions'
 
@@ -28,7 +30,7 @@ INJECTED=$(docker exec $C sh -c 'PID=$(pgrep -x tuwunel | head -1); [ -n "$PID" 
 echo "injected_env_present=$INJECTED"
 if [ "$INJECTED" != "1" ]; then
   echo "FAIL: 应急变量未进入 tuwunel 进程（supervisor 的 environment 语法可能需要追加到既有 environment 行）。回滚中..."
-  docker exec $C sh -c "sed -i '/CONDUWUIT_EMERGENCY_PASSWORD/d' '$FRAG' && supervisorctl -c '$SUPMAIN' reread && supervisorctl -c '$SUPMAIN' update && supervisorctl -c '$SUPMAIN' restart tuwunel"
+  docker exec $C sh -c "sed -i '/CONDUWUIT_EMERGENCY_PASSWORD/d' '$FRAG' && supervisorctl reread && supervisorctl update && supervisorctl restart tuwunel"
   exit 1
 fi
 
@@ -40,7 +42,7 @@ for BOT in conduit tuwunel; do
 done
 if [ -z "$BOT_TOKEN" ]; then
   echo "FAIL: 机器人登录失败。回滚中..."
-  docker exec $C sh -c "sed -i '/CONDUWUIT_EMERGENCY_PASSWORD/d' '$FRAG' && supervisorctl -c '$SUPMAIN' reread && supervisorctl -c '$SUPMAIN' update && supervisorctl -c '$SUPMAIN' restart tuwunel"
+  docker exec $C sh -c "sed -i '/CONDUWUIT_EMERGENCY_PASSWORD/d' '$FRAG' && supervisorctl reread && supervisorctl update && supervisorctl restart tuwunel"
   exit 1
 fi
 
@@ -60,7 +62,7 @@ docker exec -e BOT_TOKEN="$BOT_TOKEN" $C sh -c '
 '
 
 echo "=== [7/9] 撤除应急配置并重启 Tuwunel ==="
-docker exec $C sh -c "sed -i '/CONDUWUIT_EMERGENCY_PASSWORD/d' '$FRAG' && supervisorctl -c '$SUPMAIN' reread && supervisorctl -c '$SUPMAIN' update && supervisorctl -c '$SUPMAIN' restart tuwunel" 2>&1 | head -3
+docker exec $C sh -c "sed -i '/CONDUWUIT_EMERGENCY_PASSWORD/d' '$FRAG' && supervisorctl reread && supervisorctl update && supervisorctl restart tuwunel" 2>&1 | head -3
 sleep 12
 
 echo "=== [8/9] 验证：admin 用 controller env 密码可登录 ==="
